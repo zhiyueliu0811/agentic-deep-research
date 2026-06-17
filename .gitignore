@@ -8,6 +8,7 @@ data/
 # === Python 环境 ===
 .venv/
 __pycache__/
+.pytest_cache/
 *.py[cod]
 *.pyo
 *.egg-info/
@@ -39,4 +40,10 @@ Thumbs.db
 # === 个人笔记 & 临时文件 ===
 *学习清单*.md
 TODO.md
+PLAN.md
+deep_research_five_fixes.md
+deep_research_priority_fixes.md
+upgrade_plan.md
+output_report_*.md
+results/
 .venv1/
