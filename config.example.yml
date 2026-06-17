@@ -1,0 +1,100 @@
+stages:
+  prod:
+    cognition:
+      openai:
+        base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+        api_key: <your-dashscope-api-key>
+        organization: ""
+        default_model: qwen3-32b
+        temperature: 0.01
+        timeout_seconds: 600
+        models:
+          qwen3-235b-a22b:
+            max_tokens: 16384
+          qwen3-32b:
+            max_tokens: 8192
+    search:
+      backend: tavily
+      tavily:
+        api_key: <your-tavily-api-key>
+        base_url: https://api.tavily.com
+        max_results: 3
+        topic: general
+        include_raw_content: true
+        timeout_seconds: 300
+    roles:
+      supervisor:
+        backend: openai
+        handle: qwen3-235b-a22b
+        max_tokens: 128000
+        timeout_seconds: 600
+      red_team:
+        backend: openai
+        handle: qwen3-32b
+        max_tokens: 128000
+        timeout_seconds: 600
+      context_pruner:
+        backend: openai
+        handle: qwen3-32b
+        max_tokens: 128000
+        timeout_seconds: 600
+      researcher_main:
+        backend: openai
+        handle: qwen3-235b-a22b
+        max_tokens: 128000
+        timeout_seconds: 600
+      researcher_summarizer:
+        backend: openai
+        handle: qwen3-32b
+        max_tokens: 128000
+        timeout_seconds: 600
+      researcher_compressor:
+        backend: openai
+        handle: qwen3-32b
+        max_tokens: 128000
+        timeout_seconds: 600
+      writer:
+        backend: openai
+        handle: qwen3-235b-a22b
+        max_tokens: 128000
+        timeout_seconds: 600
+      draft:
+        backend: openai
+        handle: qwen3-235b-a22b
+        max_tokens: 128000
+        timeout_seconds: 600
+      evaluator:
+        backend: openai
+        handle: qwen3-32b
+        max_tokens: 128000
+        timeout_seconds: 600
+
+    memory:
+      enabled: true
+      embedding:
+        backend: dashscope
+        model: text-embedding-v4
+      vector_store:
+        backend: chromadb
+        persist_dir: ./data/chroma
+      structured:
+        enabled: true
+        max_entities: 15
+        max_claims: 10
+      checkpoint:
+        backend: sqlite
+        db_path: ./data/checkpoints.db
+
+    verification:
+      enabled: true
+      max_claims: 10
+      search_results_per_claim: 2
+      min_supported_ratio: 0.5
+
+    mcp:
+      enabled: false
+      servers:
+        - name: deep-research-tools
+          transport: stdio
+          command: python
+          args: ["-m", "deep_research.mcp.tool_server"]
