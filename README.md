@@ -1,15 +1,13 @@
 # Agentic Deep Research Platform 🧠
 
-基于 **LangGraph** 的多智能体深度研究系统，支持自动化网络搜索、报告生成、人工审查（HITL）与事实核查。
+基于 LangGraph 构建的多 Agent 深度研究系统，Supervisor 自主拆解任务、并行调度 Research Agent 检索，集成事实校验、人机审核与双层记忆复用，生成结构化研究报告。
 
 ## ✨ 功能亮点
 
-- **5 Agent 协作**：Supervisor → Researcher → Writer → Draft → Evaluator 流水线
-- **HITL 人工审查**：生成草稿后暂停，人工批准或修改后继续
-- **事实核查**：对报告中的关键声明进行网络验证与证据标注
-- **SSE 实时进度**：前端通过 Server-Sent Events 实时展示研究进度
-- **长期记忆**：基于 ChromaDB + DashScope Embedding 的向量记忆，新任务自动检索历史上下文
-- **成本追踪**：每次 LLM 调用的 Token 消耗与费用自动记录
+- **多智能体自演化**：Supervisor 通过 ConductResearch 工具动态拉起并行研究，Evaluator 打分回炉 + Red Team 对抗审查形成质量闭环，含停滞检测防止无效循环
+- **并行事实校验**：LLM 提取可验证主张 → 并行网络检索 → 四档判定（Supported / Partial / Unsupported / Unverifiable），输出可量化幻觉率
+- **双层记忆复用**：ChromaDB 向量语义检索 + Entities / Claims / Evidence / Contradictions 四集合结构化存储，LLM 自动抽取实体与主张，Jaccard 去重后跨会话注入上下文
+- **人机协同与全链路可观测**：LangGraph `interrupt()` 实现草稿阶段 HITL 审核断点，SSE 实时推送执行事件，Callback 层按模型计费成本追踪 + 阈值告警
 
 ## 🏗️ 架构
 
@@ -31,15 +29,7 @@ FastAPI :8000 ──→ LangGraph Agent（5 Agent 协作）
 
 ## 🛠️ 技术栈
 
-| 层 | 技术 |
-|----|------|
-| 后端框架 | FastAPI + Uvicorn |
-| Agent 编排 | LangGraph + LangChain |
-| 前端 | Next.js 15 (React) |
-| 向量存储 | ChromaDB |
-| 缓存/状态 | Redis |
-| 任务存储 | SQLite（可切换 MySQL） |
-| AI 模型 | 兼容 OpenAI API 格式（DashScope / DeepSeek / Qwen 等） |
+LangGraph · LangChain · FastAPI · Next.js · Redis · ChromaDB · Docker
 
 ## 🚀 快速开始
 
