@@ -1,0 +1,38 @@
+# docker compose up -d  一键启动所有服务
+# docker compose down    停止所有服务
+
+services:
+  backend:
+    build: .
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./config.yml:/app/config.yml:ro
+      - ./data:/app/data
+    depends_on:
+      redis:
+        condition: service_started
+    environment:
+      - STAGE=prod
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - NEXT_PUBLIC_API_BASE=http://backend:8000/api
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+volumes:
+  redis_data:
