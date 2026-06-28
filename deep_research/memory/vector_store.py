@@ -81,3 +81,14 @@ class VectorMemoryStore:
 
     def count(self) -> int:
         return self._collection.count()
+
+    def update_memory(self, doc_id: str, content: str, metadata: dict | None = None) -> None:
+        """更新已有记忆。"""
+        embedding = self._embed([content])
+        self._collection.update(
+            ids=[doc_id],
+            embeddings=embedding,
+            documents=[content],
+            metadatas=[metadata or {}],
+        )
+        logger.info("Updated memory: %s", doc_id)

@@ -163,19 +163,29 @@ async def supervisor_tools(state: SupervisorState) -> Command[Literal["superviso
         for tool_call in most_recent_message.tool_calls
     )
 
+    # 质量分数停滞检测：连续 2 次打分无提升 → 提前退出
+    quality_history = state.get("quality_history", [])
+    score_stagnated = False
+    if len(quality_history) >= 2:
+        recent = [q.get("score", 0) for q in quality_history[-2:]]
+        if len(recent) == 2 and recent[0] >= recent[1]:
+            score_stagnated = True
+            logger.info("Quality scores stagnated (%s → %s), triggering early exit", recent[0], recent[1])
+
     # 如果超过则退出
-    if exceeded_iterations or no_tool_calls or research_complete:
+    if exceeded_iterations or no_tool_calls or research_complete or score_stagnated:
         # 如果满足退出条件，我们会准备最终的、经过整理的notes。
-        # 优先使用结构化的知识库，但如果知识库为空，则使用raw notes。
         final_notes = get_notes_from_tool_calls(state.get("supervisor_messages", []))
         logger.info("[REPORT] The research is complete, writing the final report.")
 
-        # 我们返回一个END来结束这个子图，并将最后的notes传递给supervisor。
+        # 强制执行红队审查后再退出
+        # 设置 final_exit 标志，red_team 节点看到后会跳转到 __end__
         return Command(
-                goto=END,
+                goto="red_team",
                 update={
                     "notes": final_notes,
-                    "research_brief": state.get("research_brief", "")
+                    "research_brief": state.get("research_brief", ""),
+                    "final_exit": True,
         })
 
     else:

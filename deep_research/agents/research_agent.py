@@ -64,12 +64,29 @@ def tool_node(state: ResearcherState):
     tool_calls = state["researcher_messages"][-1].tool_calls
     logger.info("tool_node executing %d tool calls", len(tool_calls or []))
 
+    # 获取已搜索过的 URL 集合，用于跨轮去重
+    seen_urls_set = set(state.get("seen_urls", []))
+    new_urls: list[str] = []
+
     # 调用工具
     observations = []
     for tool_call in tool_calls:
         tool = tools_by_name[tool_call["name"]]
         logger.info("Invoking tool %s with args=%s", tool_call["name"], tool_call["args"])
-        observations.append(tool.invoke(tool_call["args"]))
+        result = tool.invoke(tool_call["args"])
+        observations.append(result)
+
+    # 从搜索结果中提取 URL 用于跨轮去重
+    for obs in observations:
+        if isinstance(obs, str) and "URL:" in obs:
+            for line in obs.split("\n"):
+                if line.strip().startswith("URL:"):
+                    url = line.strip()[4:].strip()
+                    if url and url not in seen_urls_set:
+                        new_urls.append(url)
+
+    if new_urls:
+        logger.info("tool_node found %d new URLs, total seen=%d", len(new_urls), len(seen_urls_set) + len(new_urls))
 
     # 获取工具输出
     tool_outputs = [
@@ -83,6 +100,7 @@ def tool_node(state: ResearcherState):
     return {
         "researcher_messages": tool_outputs,
         "tool_call_iterations": state.get("tool_call_iterations", 0) + 1,
+        "seen_urls": new_urls,
     }
 
 def compress_research(state: ResearcherState) -> dict:

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head><title>API Test</title></head>
+<body>
+<h1>API 连通性测试</h1>
+<button onclick="testHealth()">测试 Health</button>
+<button onclick="testStart()">测试 Start</button>
+<pre id="result"></pre>
+<script>
+const API = "http://localhost:8000/api";
+function show(msg) { document.getElementById("result").textContent += msg + "\n"; }
+async function testHealth() {
+  show("Testing health...");
+  try {
+    const r = await fetch(API + "/health");
+    const j = await r.json();
+    show("OK: " + JSON.stringify(j));
+  } catch(e) { show("FAIL: " + e.message); }
+}
+async function testStart() {
+  show("Testing start...");
+  try {
+    const r = await fetch(API + "/research/start", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({query: "test"})
+    });
+    const j = await r.json();
+    show("OK: " + JSON.stringify(j));
+  } catch(e) { show("FAIL: " + e.message); }
+}
+</script>
+</body>
+</html>

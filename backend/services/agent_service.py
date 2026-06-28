@@ -80,14 +80,17 @@ def _get_checkpointer():
     return _checkpointer
 
 
-def _build_agent():
-    """构建 agent 实例（共享 checkpointer）。
+_agent_cache: Any = None
 
-    优先使用 RedisSaver 实现跨进程/跨重启的 checkpoint 持久化，
-    Redis 不可用时自动降级为 InMemorySaver。
-    """
+
+def _build_agent():
+    """构建 agent 实例（缓存复用，避免每次请求重编译 3-8 秒）。"""
+    global _agent_cache
+    if _agent_cache is not None:
+        return _agent_cache
     builder = _create_builder(with_hitl=True)
-    return builder.compile(checkpointer=_get_checkpointer())
+    _agent_cache = builder.compile(checkpointer=_get_checkpointer())
+    return _agent_cache
 
 
 # ===== 任务 CRUD =====
@@ -165,10 +168,10 @@ def build_resume_command(action: str, feedback: str = "") -> Command:
     return Command(resume={"action": "approve"})
 
 
-def extract_final_state(agent, thread_config: dict) -> dict:
+async def extract_final_state(agent, thread_config: dict) -> dict:
     """从 agent checkpointer 中提取最终状态。"""
     try:
-        state = agent.get_state(thread_config)
+        state = await agent.aget_state(thread_config)
         if state and state.values:
             return {
                 "final_report": state.values.get("final_report", ""),
@@ -181,11 +184,11 @@ def extract_final_state(agent, thread_config: dict) -> dict:
     return {}
 
 
-def get_report(thread_id: str) -> dict:
+async def get_report(thread_id: str) -> dict:
     """获取最终报告（优先 agent state，回退到 task_store）。"""
     agent = _build_agent()
     config = get_thread_config(thread_id)
-    state_values = extract_final_state(agent, config)
+    state_values = await extract_final_state(agent, config)
 
     task = task_store.get_task(thread_id) or {}
 

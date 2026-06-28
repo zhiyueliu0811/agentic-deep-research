@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html><head><title>SSE Test</title></head><body>
+<h1>SSE 连接测试</h1>
+<input id="query" value="AI是什么" style="width:300px">
+<button onclick="start()">1. 创建研究</button>
+<button onclick="testSSE()">2. 连接SSE</button>
+<pre id="log"></pre>
+<script>
+const API = "http://localhost:8000/api";
+let tid = "";
+function log(msg) { document.getElementById("log").textContent += msg + "\n"; }
+async function start() {
+  log("创建研究中...");
+  const r = await fetch(API + "/research/start", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({query: document.getElementById("query").value}) });
+  const j = await r.json();
+  tid = j.thread_id;
+  log("thread_id: " + tid);
+}
+function testSSE() {
+  if (!tid) { log("请先创建研究!"); return; }
+  log("连接 SSE: " + API + "/research/" + tid + "/stream");
+  const es = new EventSource(API + "/research/" + tid + "/stream");
+  es.onopen = () => log("SSE 连接成功!");
+  es.onmessage = (e) => { log("收到: " + e.data.substring(0,100)); };
+  es.onerror = () => { log("SSE 错误! readyState=" + es.readyState); };
+}
+</script>
+</body></html>

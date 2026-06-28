@@ -177,8 +177,12 @@ async def final_report_generation(state: AgentState):
     )
     final_report_prompt = report_context + warning
 
-    final_report = await writer_model.ainvoke([HumanMessage(content=final_report_prompt)])
-    report_content = final_report.content
+    # 流式生成：逐 token 输出，前端可以实时渲染
+    report_chunks: list[str] = []
+    async for chunk in writer_model.astream([HumanMessage(content=final_report_prompt)]):
+        if chunk.content:
+            report_chunks.append(chunk.content)
+    report_content = "".join(report_chunks)
 
     # 存储到记忆库
     try:

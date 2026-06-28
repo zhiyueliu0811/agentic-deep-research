@@ -8,6 +8,13 @@ from fastapi import APIRouter, HTTPException
 
 router = APIRouter(prefix="/api/obs", tags=["observability"])
 
+# ---- 告警阈值 ----
+ALERT_THRESHOLDS = {
+    "max_cost_per_task_rmb": 2.0,     # 单次任务超过 ¥2 告警
+    "max_hallucination_rate": 0.3,    # 幻觉率超过 30% 告警
+    "min_quality_score": 5.0,         # 质量均分低于 5 告警
+}
+
 DATA_DIR = os.path.join(os.getcwd(), "data")
 TRACE_PATH = os.path.join(DATA_DIR, "agent_trace.jsonl")
 COST_PATH = os.path.join(DATA_DIR, "cost_log.jsonl")
@@ -70,7 +77,7 @@ async def get_cost(thread_id: str):
 
 @router.get("/stats")
 async def get_stats():
-    """返回全局统计摘要。"""
+    """返回全局统计摘要 + 幻觉率趋势。"""
     records = _read_jsonl(COST_PATH)
     trace_events = _read_jsonl(TRACE_PATH)
 
@@ -78,14 +85,91 @@ async def get_stats():
     total_output = sum(r.get("output_tokens", 0) for r in records)
     total_cost = sum(r.get("cost_rmb", 0) for r in records)
 
+    # 幻觉率趋势：从 trace 中的 quality_score 和 critique 事件汇总
+    quality_events = [e for e in trace_events if e.get("event_type") == "quality_score"]
+    hallucination_rates: list[dict] = []
+
+    # 按 thread_id 聚合 quality scores
+    by_thread: dict[str, list[dict]] = {}
+    for e in quality_events:
+        tid = e.get("thread_id", "")
+        if tid:
+            by_thread.setdefault(tid, []).append(e)
+
+    for tid, events in by_thread.items():
+        scores = [ev.get("data", {}).get("score", 0) for ev in events]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        hallucination_rates.append({
+            "thread_id": tid,
+            "avg_quality_score": round(avg_score, 2),
+            "iterations": len(scores),
+            "score_trend": scores,
+        })
+
     return {
-        "total_tasks": 0,
+        "total_tasks": len(by_thread),
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
         "total_tokens": total_input + total_output,
         "total_cost_rmb": round(total_cost, 4),
         "total_llm_calls": len(records),
         "total_trace_events": len(trace_events),
+        "quality_stats": {
+            "threads_with_quality_scores": len(hallucination_rates),
+            "average_quality_score": round(sum(h["avg_quality_score"] for h in hallucination_rates) / len(hallucination_rates), 2) if hallucination_rates else 0,
+            "per_thread": hallucination_rates[-20:],  # 最近 20 个任务
+        },
+    }
+
+
+@router.get("/alerts")
+async def get_alerts():
+    """返回当前质量告警。"""
+    records = _read_jsonl(COST_PATH)
+    trace_events = _read_jsonl(TRACE_PATH)
+
+    alerts: list[dict] = []
+
+    # 按 thread_id 聚合 cost
+    cost_by_thread: dict[str, float] = {}
+    for r in records:
+        tid = r.get("thread_id", "")
+        cost_by_thread[tid] = cost_by_thread.get(tid, 0) + r.get("cost_rmb", 0)
+
+    for tid, cost in cost_by_thread.items():
+        if cost > ALERT_THRESHOLDS["max_cost_per_task_rmb"]:
+            alerts.append({
+                "type": "high_cost",
+                "thread_id": tid,
+                "message": f"任务成本 ¥{cost:.2f} 超过阈值 ¥{ALERT_THRESHOLDS['max_cost_per_task_rmb']}",
+                "value": round(cost, 4),
+                "threshold": ALERT_THRESHOLDS["max_cost_per_task_rmb"],
+            })
+
+    # 质量告警
+    quality_events = [e for e in trace_events if e.get("event_type") == "quality_score"]
+    by_thread: dict[str, list[dict]] = {}
+    for e in quality_events:
+        tid = e.get("thread_id", "")
+        if tid:
+            by_thread.setdefault(tid, []).append(e)
+
+    for tid, events in by_thread.items():
+        scores = [ev.get("data", {}).get("score", 0) for ev in events]
+        avg_score = sum(scores) / len(scores) if scores else 0
+        if avg_score < ALERT_THRESHOLDS["min_quality_score"] and avg_score > 0:
+            alerts.append({
+                "type": "low_quality",
+                "thread_id": tid,
+                "message": f"质量均分 {avg_score:.1f} 低于阈值 {ALERT_THRESHOLDS['min_quality_score']}",
+                "value": round(avg_score, 2),
+                "threshold": ALERT_THRESHOLDS["min_quality_score"],
+            })
+
+    return {
+        "alerts_count": len(alerts),
+        "thresholds": ALERT_THRESHOLDS,
+        "alerts": alerts[-20:],  # 最近 20 条告警
     }
 
 

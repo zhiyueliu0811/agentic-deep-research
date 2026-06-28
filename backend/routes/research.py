@@ -66,6 +66,40 @@ def _pop_review(thread_id: str) -> dict | None:
     return _memory_reviews.pop(thread_id, None)
 
 
+def _get_cost_summary(thread_id: str) -> dict:
+    """从 cost_log.jsonl 中按 thread_id 汇总 token 消耗和费用。"""
+    import os as _os
+    cost_path = _os.path.join(_os.getcwd(), "data", "cost_log.jsonl")
+    if not _os.path.exists(cost_path):
+        return {}
+    total_input = 0
+    total_output = 0
+    total_cost = 0.0
+    try:
+        with open(cost_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if r.get("thread_id") != thread_id:
+                    continue
+                total_input += r.get("input_tokens", 0)
+                total_output += r.get("output_tokens", 0)
+                total_cost += r.get("cost_rmb", 0)
+    except Exception:
+        pass
+    return {
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output,
+        "total_tokens": total_input + total_output,
+        "total_cost_rmb": round(total_cost, 4),
+    }
+
+
 @router.post("/start")
 async def start_research(req: ResearchRequest):
     """提交研究任务，返回 thread_id。"""
@@ -73,11 +107,13 @@ async def start_research(req: ResearchRequest):
     return result
 
 
-def _is_waiting_review(agent, thread_config: dict) -> bool:
+async def _is_waiting_review(agent, thread_config: dict) -> bool:
     try:
-        state = agent.get_state(thread_config)
+        state = await agent.aget_state(thread_config)
         return bool(state.next and "human_review" in state.next)
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("_is_waiting_review failed: %s", e)
         return False
 
 
@@ -97,45 +133,56 @@ async def stream_research(thread_id: str):
 
     async def event_generator():
         start_time = time.time()
-        agent = svc._build_agent()
-
-        # 检查是否有待处理的审查决定
-        review = _pop_review(thread_id)
-        # 或者检查 agent 是否停在 human_review
-        if not review and _is_waiting_review(agent, thread_config):
-            # 还没收到审查决定，等待（让前端通过 resume 提交后再重连）
-            state = agent.get_state(thread_config)
-            draft = (state.values.get("draft_report", "") or "") if state.values else ""
-            svc.update_task(thread_id, status="waiting_review", stage="human_review", draft_report=draft)
-            yield f"data: {json.dumps({'event': 'human_review_required', 'data': {'draft_preview': draft[:2000], 'message': '报告草稿已生成，请审查'}}, ensure_ascii=False)}\n\n"
+        try:
+            agent = svc._build_agent()
+        except Exception as e:
+            import logging; logging.getLogger(__name__).error("_build_agent failed: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'event': 'error', 'data': {'message': f'Agent 构建失败: {e}'}}, ensure_ascii=False)}\n\n"
             return
 
-        if review:
-            # 有审查决定：用 resume command 恢复执行
-            svc.set_task_stage(thread_id, "supervisor_subgraph")
-            user_input = svc.build_resume_command(review["action"], review.get("feedback", ""))
-        else:
-            # 首次启动：用原始 query 开始
-            svc.set_task_stage(thread_id, "write_research_brief")
-            user_input = svc.build_input(query)
+        try:
+            # 检查是否有待处理的审查决定
+            review = _pop_review(thread_id)
+            # 或者检查 agent 是否停在 human_review
+            if not review and await _is_waiting_review(agent, thread_config):
+                # 还没收到审查决定，等待（让前端通过 resume 提交后再重连）
+                state = await agent.aget_state(thread_config)
+                draft = (state.values.get("draft_report", "") or "") if state.values else ""
+                svc.update_task(thread_id, status="waiting_review", stage="human_review", draft_report=draft)
+                yield f"data: {json.dumps({'event': 'human_review_required', 'data': {'draft_preview': draft[:2000], 'message': '报告草稿已生成，请审查'}}, ensure_ascii=False)}\n\n"
+                return
 
-        async for sse_msg in sse_event_stream(agent, user_input, thread_config, thread_id=thread_id):
-            yield sse_msg
+            if review:
+                # 有审查决定：用 resume command 恢复执行
+                svc.set_task_stage(thread_id, "supervisor_subgraph")
+                user_input = svc.build_resume_command(review["action"], review.get("feedback", ""))
+            else:
+                # 首次启动：用原始 query 开始
+                svc.set_task_stage(thread_id, "write_research_brief")
+                user_input = svc.build_input(query)
 
-        # SSE 流结束后检查最终状态
-        final = svc.extract_final_state(agent, thread_config)
-        if final.get("final_report"):
-            svc.mark_task_completed(thread_id, final["final_report"], final.get("verification"))
-            yield f"data: {json.dumps({'event': 'complete', 'data': {'duration_seconds': round(time.time() - start_time, 1)}}, ensure_ascii=False)}\n\n"
-        elif _is_waiting_review(agent, thread_config):
-            state = agent.get_state(thread_config)
-            draft = (state.values.get("draft_report", "") or "") if state.values else ""
-            svc.update_task(thread_id, status="waiting_review", stage="human_review", draft_report=draft)
-            yield f"data: {json.dumps({'event': 'human_review_required', 'data': {'draft_preview': draft[:2000], 'message': '报告草稿已生成，请审查'}}, ensure_ascii=False)}\n\n"
-        else:
-            # 既没有 final_report 也不在 waiting_review → 流程异常终止
-            svc.mark_task_failed(thread_id, "工作流异常终止，未生成最终报告")
-            yield f"data: {json.dumps({'event': 'error', 'data': {'message': '工作流异常终止，未生成最终报告'}}, ensure_ascii=False)}\n\n"
+            async for sse_msg in sse_event_stream(agent, user_input, thread_config, thread_id=thread_id):
+                yield sse_msg
+
+            # SSE 流结束后检查最终状态
+            final = await svc.extract_final_state(agent, thread_config)
+            if final.get("final_report"):
+                svc.mark_task_completed(thread_id, final["final_report"], final.get("verification"))
+                cost_data = _get_cost_summary(thread_id)
+                yield f"data: {json.dumps({'event': 'complete', 'data': {'duration_seconds': round(time.time() - start_time, 1), **cost_data}}, ensure_ascii=False)}\n\n"
+            elif await _is_waiting_review(agent, thread_config):
+                state = await agent.aget_state(thread_config)
+                draft = (state.values.get("draft_report", "") or "") if state.values else ""
+                svc.update_task(thread_id, status="waiting_review", stage="human_review", draft_report=draft)
+                yield f"data: {json.dumps({'event': 'human_review_required', 'data': {'draft_preview': draft[:2000], 'message': '报告草稿已生成，请审查'}}, ensure_ascii=False)}\n\n"
+            else:
+                # 既没有 final_report 也不在 waiting_review → 流程异常终止
+                svc.mark_task_failed(thread_id, "工作流异常终止，未生成最终报告")
+                yield f"data: {json.dumps({'event': 'error', 'data': {'message': '工作流异常终止，未生成最终报告'}}, ensure_ascii=False)}\n\n"
+
+        except Exception as e:
+            import logging; logging.getLogger(__name__).error("SSE stream failed: %s", e, exc_info=True)
+            yield f"data: {json.dumps({'event': 'error', 'data': {'message': f'流处理异常: {e}'}}, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
         event_generator(),
@@ -182,7 +229,7 @@ async def delete_research_task(thread_id: str):
 @router.get("/{thread_id}/report")
 async def get_research_report(thread_id: str):
     """获取最终报告。"""
-    report = svc.get_report(thread_id)
+    report = await svc.get_report(thread_id)
     if not report.get("final_report"):
         raise HTTPException(status_code=404, detail="Report not found or task not completed")
     return report

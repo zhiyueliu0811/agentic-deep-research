@@ -39,6 +39,7 @@ _MODEL_PRICE_PER_M_TOKEN = {
     "deepseek-v4-pro": {"input": 2.0, "output": 8.0},
     "deepseek-v4-flash": {"input": 0.5, "output": 2.0},
     # 旧 Qwen 模型（保留备用）
+    "qwen3-8b": {"input": 0.5, "output": 2.0},
     "qwen3-235b-a22b": {"input": 4.0, "output": 16.0},
     "qwen3-32b": {"input": 3.5, "output": 7.0},
 }

@@ -25,6 +25,7 @@ class ResearcherState(TypedDict):
     research_topic: str
     compressed_research: str
     raw_notes: Annotated[List[str], operator.add]
+    seen_urls: Annotated[List[str], operator.add]  # 已搜索过的 URL，跨迭代去重
 
 class ResearcherOutputState(TypedDict):
     """Research Agent的输出状态，包含最终的研究结果。
@@ -33,6 +34,7 @@ class ResearcherOutputState(TypedDict):
     compressed_research: str
     raw_notes: Annotated[List[str], operator.add]
     researcher_messages: Annotated[Sequence[BaseMessage], add_messages]
+    seen_urls: Annotated[List[str], operator.add]
 
 
 # ===== STRUCTURED OUTPUT SCHEMAS =====
